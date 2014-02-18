@@ -80,6 +80,7 @@ Contains code snippets which are:
 
 #include "commandline.h"
 
+#define PRV_TLV_BUFFER_SIZE 16 // Added For create Methods
 #define MAX_PACKET_SIZE 128
 #define SERVER_PORT "5684"
 
@@ -325,6 +326,7 @@ static void prv_write_client(char * buffer,
     int i;
     int result;
 
+    //get Client ID
     result = prv_read_id(buffer, &clientId);
     if (result != 1) goto syntax_error;
 
@@ -394,6 +396,73 @@ static void prv_exec_client(char * buffer,
     {
         result = lwm2m_dm_execute(lwm2mH, clientId, &uri, buffer, strlen(buffer), prv_result_callback, NULL);
     }
+
+    if (result == 0)
+    {
+        fprintf(stdout, "OK");
+    }
+    else
+    {
+        fprintf(stdout, "Error %d.%2d", (result&0xE0)>>5, result&0x1F);
+    }
+    return;
+
+syntax_error:
+    fprintf(stdout, "Syntax error !");
+}
+
+static void prv_create_client(char * buffer,
+                              void * user_data)
+{
+    lwm2m_context_t * lwm2mH = (lwm2m_context_t *) user_data;
+    uint16_t clientId;
+    lwm2m_uri_t uri;
+    char * uriString;
+	int i;
+    int result;
+    uint64_t value;
+    char temp_buffer[PRV_TLV_BUFFER_SIZE];
+    int temp_length = 0;
+
+
+    //Get Client ID
+    result = prv_read_id(buffer, &clientId);
+    if (result != 1) goto syntax_error;
+
+    buffer = get_next_arg(buffer);
+    if (buffer[0] == 0) goto syntax_error;
+
+    //save Uri start address
+    uriString = buffer;
+
+    //Get Data to Post
+    buffer = get_next_arg(buffer);
+    if (buffer[0] == 0) goto syntax_error;
+
+
+    //Get Uri
+    i = 0;
+    while (uriString + i < buffer && !isspace(uriString[i]))
+    {
+ 	   i++;
+    }
+    result = lwm2m_stringToUri(uriString, i, &uri);
+    if (result == 0) goto syntax_error;
+
+   // TLV
+
+   /* Client dependent part   */
+
+
+   result = lwm2m_PlainTextToInt64(buffer,strlen(buffer),&value);
+   temp_length = lwm2m_intToTLV(TLV_RESSOURCE, value, (uint16_t) 1, temp_buffer, PRV_TLV_BUFFER_SIZE);
+
+   /* End Client dependent part*/
+
+
+   result = lwm2m_dm_create(lwm2mH, clientId,&uri, temp_buffer, temp_length, prv_result_callback, NULL);
+    //Create
+    //result = lwm2m_dm_create(lwm2mH, clientId,&uri, bufferP, lengthP, prv_result_callback, NULL);
 
     if (result == 0)
     {
@@ -622,6 +691,10 @@ int main(int argc, char *argv[])
                                             "   CLIENT#: client number as returned by command 'list'\r\n"
                                             "   URI: uri of the instance to delete such as /1024/11\r\n"
                                             "Result will be displayed asynchronously.", prv_delete_client, NULL},
+		    {"create", "create an Object instance.", " create CLIENT# URI\r\n"
+											"   CLIENT#: client number as returned by command 'list'\r\n"
+		    								"   URI: uri to which create the Object Instance such as /1024, /1024/45 \r\n"
+											"Result will be displayed asynchronously.", prv_create_client, NULL},                              
             {"observe", "Observe from a client.", " observe CLIENT# URI\r\n"
                                             "   CLIENT#: client number as returned by command 'list'\r\n"
                                             "   URI: uri to observe such as /3, /3/0/2, /1024/11\r\n"

@@ -388,7 +388,14 @@ int main(int argc, char *argv[])
      * the number of objects we will be passing through, the object constructor array and the function that will be in
      * charge to send the buffer (containing the LWM2M packets) to the network
      */
-    lwm2mH = lwm2m_init("testlwm2mclient", 2, objArray, prv_buffer_send);
+
+      time_t t;
+      /* Intializes random number generator */
+      srand((unsigned) time(&t));
+    char name[30];
+    sprintf(name,"testclient%d",rand()%1000);
+
+    lwm2mH = lwm2m_init(name, 2, objArray, prv_buffer_send);
     if (NULL == lwm2mH)
     {
         fprintf(stderr, "lwm2m_init() failed\r\n");
@@ -442,6 +449,7 @@ int main(int argc, char *argv[])
     /*
      * We now enter in a while loop that will handle the communications from the server
      */
+
     while (0 == g_quit)
     {
         struct timeval tv;

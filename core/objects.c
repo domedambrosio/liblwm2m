@@ -126,7 +126,7 @@ coap_status_t object_create_execute(lwm2m_context_t * contextP,
 
         return targetP->executeFunc(uriP, buffer, length, targetP);
     }
-    else if (uriP->flag & LWM2M_URI_FLAG_RESOURCE_ID == 0
+    else if ((uriP->flag & LWM2M_URI_FLAG_RESOURCE_ID) == 0
           && length != 0)
     {
         // This is a create
