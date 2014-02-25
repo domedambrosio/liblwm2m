@@ -82,7 +82,7 @@ coap_status_t object_write(lwm2m_context_t * contextP,
 {
     lwm2m_object_t * targetP;
 
-    if (uriP->flag & LWM2M_URI_FLAG_INSTANCE_ID == 0)
+    if ((uriP->flag & LWM2M_URI_FLAG_INSTANCE_ID) == 0)
     {
         return BAD_REQUEST_4_00;
     }
@@ -115,8 +115,7 @@ coap_status_t object_create_execute(lwm2m_context_t * contextP,
         return NOT_FOUND_4_04;
     }
 
-    if (uriP->flag & LWM2M_URI_FLAG_INSTANCE_ID != 0
-     && uriP->flag & LWM2M_URI_FLAG_RESOURCE_ID != 0)
+    if (LWM2M_URI_IS_SET_INSTANCE(uriP) && LWM2M_URI_IS_SET_RESOURCE(uriP))
     {
         // This is an execute
         if (NULL == targetP->executeFunc)
@@ -148,9 +147,8 @@ coap_status_t object_delete(lwm2m_context_t * contextP,
                             lwm2m_uri_t * uriP)
 {
     lwm2m_object_t * targetP;
-
-    if (uriP->flag & LWM2M_URI_FLAG_INSTANCE_ID == 0
-     || uriP->flag & LWM2M_URI_FLAG_RESOURCE_ID != 0)
+    if ((uriP->flag & LWM2M_URI_FLAG_INSTANCE_ID) == 0
+     || LWM2M_URI_IS_SET_RESOURCE(uriP))
     {
         return BAD_REQUEST_4_00;
     }
@@ -168,6 +166,7 @@ coap_status_t object_delete(lwm2m_context_t * contextP,
 
     return targetP->deleteFunc(uriP->instanceId, targetP);
 }
+
 
 int prv_getRegisterPayload(lwm2m_context_t * contextP,
                            char * buffer,

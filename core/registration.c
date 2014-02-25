@@ -132,6 +132,46 @@ int lwm2m_register(lwm2m_context_t * contextP)
     return 0;
 }
 
+
+int lwm2m_update(lwm2m_context_t * contextP)
+{
+    char payload[512];
+    int payload_length;
+    lwm2m_server_t * targetP;
+
+    payload_length = prv_getRegisterPayload(contextP, payload, sizeof(payload));
+    if (payload_length == 0) return INTERNAL_SERVER_ERROR_5_00;
+
+    targetP = contextP->serverList;
+    while (targetP != NULL)
+    {
+        lwm2m_transaction_t * transaction;
+
+        transaction = transaction_new(COAP_PUT, NULL, contextP->nextMID++, ENDPOINT_SERVER, (void *)targetP);
+        if (transaction == NULL) return INTERNAL_SERVER_ERROR_5_00;
+
+        coap_set_header_uri_path(transaction->message, "/");
+        coap_set_payload(transaction->message, payload, payload_length);
+
+        //transaction->callback = prv_handleUpdateReply;
+        transaction->userData = (void *) contextP;
+
+        contextP->transactionList = (lwm2m_transaction_t *)LWM2M_LIST_ADD(contextP->transactionList, transaction);
+        if (transaction_send(contextP, transaction) == 0)
+        {
+            targetP->status = STATE_REG_PENDING;
+            targetP->mid = transaction->mID;
+        }
+
+        targetP = targetP->next;
+    }
+
+    return 0;
+}
+
+
+
+
 void registration_deregister(lwm2m_context_t * contextP,
                              lwm2m_server_t * serverP)
 {
