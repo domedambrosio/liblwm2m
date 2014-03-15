@@ -29,7 +29,7 @@ David Navarro <david.navarro@intel.com>
 */
 
 
-#include "core/liblwm2m.h"
+#include "liblwm2m.h"
 #include "commandline.h"
 
 #include <string.h>
@@ -51,6 +51,7 @@ David Navarro <david.navarro@intel.com>
 
 static int g_quit = 0;
 
+extern lwm2m_object_t * get_object_server();
 extern lwm2m_object_t * get_object_device();
 extern lwm2m_object_t * get_object_firmware();
 extern lwm2m_object_t * get_test_object();
@@ -81,9 +82,10 @@ typedef struct
 
 static uint8_t prv_buffer_send(void * sessionH,
                                uint8_t * buffer,
-                               size_t length)
+                               size_t length,
+                               void * userdata)
 {
-    size_t nbSent;
+    ssize_t nbSent;
     size_t offset;
     connection_t * connP = (connection_t*) sessionH;
 
@@ -186,7 +188,6 @@ static void prv_output_servers(char * buffer,
 {
     lwm2m_context_t * lwm2mH = (lwm2m_context_t *) user_data;
     lwm2m_server_t * targetP;
-    lwm2m_client_object_t * objectP;
 
     targetP = lwm2mH->serverList;
 
@@ -198,8 +199,6 @@ static void prv_output_servers(char * buffer,
 
     for (targetP = lwm2mH->serverList ; targetP != NULL ; targetP = targetP->next)
     {
-        char s[INET6_ADDRSTRLEN];
-
         fprintf(stdout, "Server ID %d:\r\n", targetP->shortID);
         fprintf(stdout, "\tstatus: ");
         switch(targetP->status)
@@ -224,7 +223,7 @@ static void prv_change(char * buffer,
     lwm2m_context_t * lwm2mH = (lwm2m_context_t *) user_data;
     lwm2m_uri_t uri;
     int result;
-    int length;
+    size_t length;
 
     if (buffer[0] == 0) goto syntax_error;
 
@@ -281,6 +280,24 @@ static void prv_change(char * buffer,
 syntax_error:
     fprintf(stdout, "Syntax error !");
 }
+static void prv_update(char * buffer,
+                        void * user_data)
+ {
+
+    lwm2m_context_t * lwm2mH = (lwm2m_context_t *) user_data;
+    lwm2m_server_t* targetP = lwm2mH->serverList;
+    while (targetP != NULL)
+    {
+        if (targetP->status != STATE_REGISTERED) continue;
+
+        registration_update(lwm2mH,targetP);
+        targetP = targetP->next;
+    }
+
+    fprintf(stdout,"REGISTRATION UPDATED\r\n");
+ }
+
+
 
 static connection_t * prv_createConnection(char * host,
                                            uint16_t port)
@@ -332,7 +349,7 @@ int main(int argc, char *argv[])
     int socket;
     int result;
     lwm2m_context_t * lwm2mH = NULL;
-    lwm2m_object_t * objArray[3];
+    lwm2m_object_t * objArray[4];
     lwm2m_security_t security;
     int i;
     connection_t * connP;
@@ -350,6 +367,7 @@ int main(int argc, char *argv[])
             {"change", "Change the value of resource.", " change URI [DATA]\r\n"
                                                         "   URI: uri of the resource such as /3/0, /3/0/2\r\n"
                                                         "   DATA: (optional) new value\r\n", prv_change, NULL},
+			{"update", "Send a registration update to the servers.", NULL, prv_update, NULL},
             {"quit", "Quit the client gracefully.", NULL, prv_quit, NULL},
             {"^C", "Quit the client abruptly (without sending a de-register message).", NULL, NULL, NULL},
 
@@ -370,22 +388,30 @@ int main(int argc, char *argv[])
      * Now the main function fill an array with each object, this list will be later passed to liblwm2m.
      * Those functions are located in their respective object file.
      */
-    objArray[0] = get_object_device();
-    if (NULL == objArray[0])
+    objArray[0] = get_object_server();
+       if (NULL == objArray[0])
+       {
+           fprintf(stderr, "Failed to create Server object\r\n");
+           return -1;
+       }
+
+
+    objArray[1] = get_object_device();
+    if (NULL == objArray[1])
     {
         fprintf(stderr, "Failed to create Device object\r\n");
         return -1;
     }
 
-    objArray[1] = get_object_firmware();
-    if (NULL == objArray[1])
+    objArray[2] = get_object_firmware();
+    if (NULL == objArray[2])
     {
         fprintf(stderr, "Failed to create Firmware object\r\n");
         return -1;
     }
 
-    objArray[2] = get_test_object();
-    if (NULL == objArray[2])
+    objArray[3] = get_test_object();
+    if (NULL == objArray[3])
     {
         fprintf(stderr, "Failed to create test object\r\n");
         return -1;
@@ -398,17 +424,24 @@ int main(int argc, char *argv[])
      */
 
       time_t t;
-      /* Intializes random number generator to get random ID name*/
+      /* Intializes random number generator to get random ID*/
       srand((unsigned) time(&t));
     char name[30];
     sprintf(name,"testclient%d",rand()%1000);
 
-    lwm2mH = lwm2m_init(name, 3, objArray, prv_buffer_send);
+    lwm2mH = lwm2m_init(name, 4, objArray, prv_buffer_send,NULL);
     if (NULL == lwm2mH)
     {
         fprintf(stderr, "lwm2m_init() failed\r\n");
         return -1;
     }
+    //TEMP: add context to server object
+    objArray[0]->userData = malloc(sizeof(lwm2m_context_t));
+
+	if(objArray[0]->userData != NULL){
+		objArray[0]->userData = lwm2mH;
+	}
+    if(NULL==objArray[0]->userData) fprintf(stderr,"CONTEXT NULL\n");
 
     signal(SIGINT, handle_sigint);
 
@@ -422,12 +455,14 @@ int main(int argc, char *argv[])
 
     memset(&security, 0, sizeof(lwm2m_security_t));
 
+
+    //TODO: [simulate bootstrap] After implementing e Security Object, Read Instances from Server Object and get the info to connect from the security obj
     /*
      * This function add a server to the lwm2m context by passing an identifier, an opaque connection handler and a security
      * context.
      * You can add as many server as your application need and there will be thereby allowed to interact with your object
      */
-    result = lwm2m_add_server(lwm2mH, 123, (void *)connP, &security);
+    result = lwm2m_add_server(lwm2mH, 0, (void *)connP, &security);
     if (result != 0)
     {
         fprintf(stderr, "lwm2m_add_server() failed: 0x%X\r\n", result);

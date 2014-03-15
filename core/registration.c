@@ -46,7 +46,6 @@ David Navarro <david.navarro@intel.com>
 static void prv_handleRegistrationReply(lwm2m_transaction_t * transacP,
                                         void * message)
 {
-    lwm2m_context_t * contextP = (lwm2m_context_t *)transacP->userData;
     lwm2m_server_t * targetP;
     coap_packet_t * packet = (coap_packet_t *)message;
 
@@ -132,44 +131,79 @@ int lwm2m_register(lwm2m_context_t * contextP)
     return 0;
 }
 
+// Manage Update Message Replay
+void prv_handleUpdateReply(lwm2m_transaction_t * transacP,
+                           void * message){
+    lwm2m_server_t * targetP;
+    coap_packet_t * packet = (coap_packet_t *)message;
+    targetP = (lwm2m_server_t *)(transacP->peerP);
+	if (packet == NULL)
+	{
+		//TODO packet null, now?
+		targetP->mid = 0;
+	}
+	else if (packet->mid == targetP->mid
+		  && packet->type == COAP_TYPE_ACK)
+	{
+		if (packet->code == CHANGED_2_04)
+		{
+			//TODO change ServerObject->updateAvailable here?
+			fprintf(stdout,"handle update successful\n");
+		}
+		else if (packet->code == BAD_REQUEST_4_00)
+		{
+			fprintf(stdout,"handle update failed\n");
+			//TODO do something?
+		}
+	}
 
-int lwm2m_update(lwm2m_context_t * contextP)
+}
+
+// Called by Trigger Update Mechanism, or Client's Criteria
+//TODO: call on client's IP or PORT change in UDP Binding Mode
+int registration_update(lwm2m_context_t * contextP,
+        		lwm2m_server_t * targetP)// add update params = 1bit for lifetime,bindmode,sms and objlist
 {
+
     char payload[512];
     int payload_length;
-    lwm2m_server_t * targetP;
 
     payload_length = prv_getRegisterPayload(contextP, payload, sizeof(payload));
     if (payload_length == 0) return INTERNAL_SERVER_ERROR_5_00;
 
-    targetP = contextP->serverList;
-    while (targetP != NULL)
-    {
-        lwm2m_transaction_t * transaction;
+	lwm2m_transaction_t * transaction;
 
-        transaction = transaction_new(COAP_PUT, NULL, contextP->nextMID++, ENDPOINT_SERVER, (void *)targetP);
-        if (transaction == NULL) return INTERNAL_SERVER_ERROR_5_00;
+	if(targetP == NULL) return INTERNAL_SERVER_ERROR_5_00;
 
-        coap_set_header_uri_path(transaction->message, "/");
-        coap_set_payload(transaction->message, payload, payload_length);
+	transaction = transaction_new(COAP_PUT, NULL, contextP->nextMID++, ENDPOINT_SERVER, (void *)targetP);
+	if (transaction == NULL) return INTERNAL_SERVER_ERROR_5_00;
 
-        //transaction->callback = prv_handleUpdateReply;
-        transaction->userData = (void *) contextP;
+	coap_set_header_uri_path(transaction->message, targetP->location);
+	coap_set_payload(transaction->message, payload, payload_length);
 
-        contextP->transactionList = (lwm2m_transaction_t *)LWM2M_LIST_ADD(contextP->transactionList, transaction);
-        if (transaction_send(contextP, transaction) == 0)
-        {
-            targetP->status = STATE_REG_PENDING;
-            targetP->mid = transaction->mID;
-        }
+	transaction->callback = prv_handleUpdateReply;
+	transaction->userData = (void *) contextP;
 
-        targetP = targetP->next;
-    }
+	contextP->transactionList = (lwm2m_transaction_t *)LWM2M_LIST_ADD(contextP->transactionList, transaction);
+	if (transaction_send(contextP, transaction) == 0)
+	{
+		//targetP->status = STATE_REG_PENDING;
+		targetP->mid = transaction->mID;
+	}
 
-    return 0;
+	//TODO  check which info send and add argument to registration_update
+	targetP->updateAvailable =0;
+
+	return COAP_204_CHANGED;
 }
 
+void prv_setRegUpdate(lwm2m_context_t * contextP){
 
+    lwm2m_server_t* s =NULL;
+    for(s = contextP->serverList; s!=NULL ; s=s->next){
+        s->updateAvailable=1;
+	}
+}
 
 
 void registration_deregister(lwm2m_context_t * contextP,
@@ -187,7 +221,7 @@ void registration_deregister(lwm2m_context_t * contextP,
     pktBufferLen = coap_serialize_message(message, pktBuffer);
     if (0 != pktBufferLen)
     {
-        contextP->bufferSendCallback(serverP->sessionH, pktBuffer, pktBufferLen);
+        contextP->bufferSendCallback(serverP->sessionH, pktBuffer, pktBufferLen, contextP->bufferSendUserData);
     }
 
     serverP->status = STATE_UNKNOWN;
@@ -410,7 +444,7 @@ coap_status_t handle_registration_request(lwm2m_context_t * contextP,
         lwm2m_client_t * clientP;
         char location[MAX_LOCATION_LENGTH];
 
-        if (uriP->flag & LWM2M_URI_MASK_ID != 0) return COAP_400_BAD_REQUEST;
+        if ((uriP->flag & LWM2M_URI_MASK_ID) != 0) return COAP_400_BAD_REQUEST;
         prv_getParameters(message->uri_query, &name);
         if (name == NULL) return COAP_400_BAD_REQUEST;
         objects = prv_decodeRegisterPayload(message->payload, message->payload_len);
@@ -460,14 +494,43 @@ coap_status_t handle_registration_request(lwm2m_context_t * contextP,
     break;
 
     case COAP_PUT:
-        result = COAP_501_NOT_IMPLEMENTED;
+    {
+
+    	lwm2m_client_t* clientP;
+    	lwm2m_client_object_t * objects;
+
+
+        if ((uriP->flag & LWM2M_URI_MASK_ID) != LWM2M_URI_FLAG_OBJECT_ID)
+        	return COAP_400_BAD_REQUEST;
+
+        clientP = lwm2m_list_find (contextP->clientList, uriP->objectId);
+
+        if (clientP == NULL) return COAP_404_NOT_FOUND;
+
+        objects = prv_decodeRegisterPayload(message->payload, message->payload_len);
+        if (objects == NULL)
+		{
+			return COAP_400_BAD_REQUEST;
+		}
+
+        prv_freeClientObjectList(clientP->objectList);
+
+        clientP->objectList = objects;
+        //TODO UPDATE Other Parameters?
+        if (contextP->monitorCallback != NULL)
+        {
+            contextP->monitorCallback(clientP->internalID, NULL, CHANGED_2_04, NULL, 0, contextP->monitorUserData);
+        }
+
+        result = CHANGED_2_04;
+    }
         break;
 
     case COAP_DELETE:
     {
         lwm2m_client_t * clientP;
 
-        if (uriP->flag & LWM2M_URI_MASK_ID != LWM2M_URI_FLAG_OBJECT_ID) return COAP_400_BAD_REQUEST;
+        if ((uriP->flag & LWM2M_URI_MASK_ID) != LWM2M_URI_FLAG_OBJECT_ID) return COAP_400_BAD_REQUEST;
 
         contextP->clientList = (lwm2m_client_t *)LWM2M_LIST_RM(contextP->clientList, uriP->objectId, &clientP);
         if (clientP == NULL) return COAP_400_BAD_REQUEST;

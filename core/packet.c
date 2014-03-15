@@ -148,7 +148,7 @@ static coap_status_t handle_request(lwm2m_context_t * contextP,
 #endif
 
 #ifdef LWM2M_SERVER_MODE
-   case LWM2M_URI_FLAG_REGISTRATION:
+    case LWM2M_URI_FLAG_REGISTRATION:
         result = handle_registration_request(contextP, uriP, fromSessionH, message, response);
         break;
 #endif
@@ -171,7 +171,7 @@ static coap_status_t handle_request(lwm2m_context_t * contextP,
  * Erbium is Copyright (c) 2013, Institute for Pervasive Computing, ETH Zurich
  * All rights reserved.
  */
-int lwm2m_handle_packet(lwm2m_context_t * contextP,
+void lwm2m_handle_packet(lwm2m_context_t * contextP,
                         uint8_t * buffer,
                         int length,
                         void * fromSessionH)
@@ -179,8 +179,6 @@ int lwm2m_handle_packet(lwm2m_context_t * contextP,
     coap_status_t coap_error_code = NO_ERROR;
     static coap_packet_t message[1];
     static coap_packet_t response[1];
-    uint8_t pktBuffer[COAP_MAX_PACKET_SIZE+1];
-    size_t pktBufferLen = 0;
 
     coap_error_code = coap_parse_message(message, buffer, (uint16_t)length);
     if (coap_error_code==NO_ERROR)
@@ -268,7 +266,7 @@ int lwm2m_handle_packet(lwm2m_context_t * contextP,
                 } /* if (blockwise request) */
 
                 coap_error_code = message_send(contextP, response, fromSessionH);
-
+                free(response->location_path);
                 lwm2m_free(response->payload);
                 response->payload = NULL;
                 response->payload_len = 0;
@@ -337,7 +335,7 @@ coap_status_t message_send(lwm2m_context_t * contextP,
     pktBufferLen = coap_serialize_message(message, pktBuffer);
     if (0 != pktBufferLen)
     {
-        result = contextP->bufferSendCallback(sessionH, pktBuffer, pktBufferLen);
+        result = contextP->bufferSendCallback(sessionH, pktBuffer, pktBufferLen, contextP->bufferSendUserData);
     }
 
     return result;

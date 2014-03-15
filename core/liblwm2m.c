@@ -40,7 +40,8 @@ David Navarro <david.navarro@intel.com>
 lwm2m_context_t * lwm2m_init(char * endpointName,
                              uint16_t numObject,
                              lwm2m_object_t * objectList[],
-                             lwm2m_buffer_send_callback_t bufferSendCallback)
+                             lwm2m_buffer_send_callback_t bufferSendCallback,
+                             void * bufferSendUserData)
 {
     lwm2m_context_t * contextP;
 
@@ -52,6 +53,7 @@ lwm2m_context_t * lwm2m_init(char * endpointName,
     {
         memset(contextP, 0, sizeof(lwm2m_context_t));
         contextP->bufferSendCallback = bufferSendCallback;
+        contextP->bufferSendUserData = bufferSendUserData;
 #ifdef LWM2M_CLIENT_MODE
         contextP->endpointName = strdup(endpointName);
         if (contextP->endpointName == NULL)
@@ -150,7 +152,7 @@ void lwm2m_close(lwm2m_context_t * contextP)
 }
 
 #ifdef LWM2M_CLIENT_MODE
-int lwm2m_set_bootstrap_server(lwm2m_context_t * contextP,
+void lwm2m_set_bootstrap_server(lwm2m_context_t * contextP,
                                lwm2m_bootstrap_server_t * serverP)
 {
     if (NULL != contextP->bootstrapServer)
@@ -169,9 +171,22 @@ int lwm2m_add_server(lwm2m_context_t * contextP,
                      lwm2m_security_t * securityP)
 {
     lwm2m_server_t * serverP;
+    lwm2m_object_t* servrerObj = NULL;
     int status = COAP_500_INTERNAL_SERVER_ERROR;
 
-    serverP = (lwm2m_server_t *)lwm2m_malloc(sizeof(lwm2m_server_t));
+    for (int i = 0 ; i < contextP->numObject ; i++)
+       {
+           if (contextP->objectList[i]->objID == 2)
+           {
+        	   servrerObj =contextP->objectList[i];
+        	   break;
+           }
+       }
+
+	if (NULL == servrerObj)
+		return status;
+
+	serverP = (lwm2m_server_t *)lwm2m_list_find(servrerObj->instanceList, shortID);
     if (serverP != NULL)
     {
         memset(serverP, 0, sizeof(lwm2m_server_t));

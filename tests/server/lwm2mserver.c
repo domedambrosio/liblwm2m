@@ -60,8 +60,7 @@ Contains code snippets which are:
 
 */
 
-#include "core/liblwm2m.h"
-#include "externals/er-coap-13/er-coap-13.h"
+#include "liblwm2m.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -135,7 +134,8 @@ static connection_t * prv_findConnection(connection_t * connList,
 
 static uint8_t prv_buffer_send(void * sessionH,
                                uint8_t * buffer,
-                               size_t length)
+                               size_t length,
+                               void * userdata)
 {
     size_t nbSent;
     size_t offset;
@@ -590,15 +590,18 @@ static void prv_monitor_callback(uint16_t clientID,
 
     switch (status)
     {
-    case CREATED_2_01:
+    case COAP_201_CREATED:
         fprintf(stdout, "\r\nNew client #%d registered.\r\n", clientID);
 
         targetP = (lwm2m_client_t *)lwm2m_list_find((lwm2m_list_t *)lwm2mH->clientList, clientID);
 
         prv_dump_client(targetP);
         break;
+    case COAP_204_CHANGED:
+		fprintf(stdout, "\r\nNew client #%d UPDATED.\r\n", clientID);
+		break;
 
-    case DELETED_2_02:
+    case COAP_202_DELETED:
         fprintf(stdout, "\r\nClient #%d unregistered.\r\n", clientID);
         break;
 
@@ -716,7 +719,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    lwm2mH = lwm2m_init("testlwm2mserver", 0, NULL, prv_buffer_send);
+    lwm2mH = lwm2m_init("testlwm2mserver", 0, NULL, prv_buffer_send, NULL);
     if (NULL == lwm2mH)
     {
         fprintf(stderr, "lwm2m_init() failed\r\n");
@@ -778,7 +781,6 @@ int main(int argc, char *argv[])
                 else
                 {
                     char s[INET6_ADDRSTRLEN];
-                    coap_status_t coap_error_code = NO_ERROR;
                     connection_t * connP;
 
                     fprintf(stderr, "%d bytes received from [%s]:%hu\r\n",
